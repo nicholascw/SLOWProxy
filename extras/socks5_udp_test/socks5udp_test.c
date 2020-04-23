@@ -4,7 +4,6 @@
  * Test purpose only.
  *
  * Copyright (C) nicholascw. Licensed with GPLv2.
- *
  */
 
 
