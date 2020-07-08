@@ -1,0 +1,30 @@
+cmake_minimum_required(VERSION 2.8)
+project(SLOWProxy C)
+set(CMAKE_C_COMPILER "clang")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -O0 -g3 -Werror -Wall -pedantic -Wno-address -Wno-unused-function")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS} -Ofast -Wall")
+file(GLOB_RECURSE ALL_DOTC LIST_DIRECTORIES false RELATIVE ${PROJECT_SOURCE_DIR} *.c)
+
+
+file(GLOB_RECURSE UNIVERSE LIST_DIRECTORIES true RELATIVE ${PROJECT_SOURCE_DIR} *)
+SET(SUBDIRS "")
+FOREACH (SUBDIR ${UNIVERSE})
+    IF (IS_DIRECTORY ${PROJECT_SOURCE_DIR}/${SUBDIR})
+        include_directories(${SUBDIR})
+    ENDIF ()
+ENDFOREACH ()
+
+add_executable(slowproxy ${ALL_DOTC} ${ALL_DOTH})
+
+find_package(OpenSSL REQUIRED)
+find_package(Threads REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_search_module(gpgme requried gpgme)
+pkg_search_module(libuv requried libuv)
+
+target_link_libraries(slowproxy ${OpenSSL_LIBRARIES})
+target_link_libraries(slowproxy ${Threads_LIBRARIES})
+target_link_libraries(slowproxy ${gpgme_LIBRARIES})
+target_link_libraries(slowproxy ${libuv_LIBRARIES})
+
+set(CMAKE_VERBOSE_MAKEFILE off)
