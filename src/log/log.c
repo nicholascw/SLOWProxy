@@ -2,13 +2,12 @@
 
 #include <stdio.h>
 #include <time.h>
-#include <string.h>
 #include <errno.h>
 
-#ifndef NDEBUG
-static loglevel_t setted_lvl = DBG;
+#ifdef NDEBUG
+static loglevel_t setted_lvl = WARN;
 #else
-static loglevel_t setted_lvl = ERR;
+static loglevel_t setted_lvl = DBG;
 #endif
 
 const static char *colors[] = {"\x1b[0;32m",
@@ -61,6 +60,7 @@ void slow_print_log(loglevel_t lvl, const char *func_name, const char *err_strin
                                   lineno, func_name, err_string);
 }
 
-void slow_set_loglevel(loglevel_t level) {
-    setted_lvl = level;
+loglevel_t slow_loglevel(loglevel_t level) {
+    if(level != INVALID) setted_lvl = level;
+    return setted_lvl;
 }

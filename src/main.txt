@@ -1,6 +1,3 @@
-#ifndef SLOWPROXY_MAIN_H
-#define SLOWPROXY_MAIN_H
-
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <sys/stat.h>
@@ -29,5 +26,3 @@
 #include <openssl/crypto.h>
 #include <uv.h>
 
-
-#endif //SLOWPROXY_MAIN_H
