@@ -1,0 +1,4 @@
+#ifndef SLOWPROXY_CONF_H
+#define SLOWPROXY_CONF_H
+
+#endif //SLOWPROXY_CONF_H

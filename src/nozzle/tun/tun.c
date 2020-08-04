@@ -27,10 +27,11 @@
  *
  * @param tun_name tun interface name.
  * @param ip_addr designated ip address.
+ * @param set_route if true, will set as default route.
  * @return On success, return 0, return value less than zero indicates a failure.
  */
 
-int tun_init(const char *tun_name, const char *ip_addr) {
+int tun_init(const char *tun_name, const char *ip_addr, bool set_route) {
 
 //Credit: Mahdi Mohammadi
 //https://stackoverflow.com/questions/6652384/how-to-set-the-ip-address-from-c-in-linux/49334944#49334944
@@ -87,37 +88,39 @@ int tun_init(const char *tun_name, const char *ip_addr) {
     }
 
     // Set route
-    struct rtentry route;
-    memset(&route, 0, sizeof(route));
-    route.rt_dev = ifr.ifr_name;
-    addr = (struct sockaddr_in *) &route.rt_gateway;
-    addr->sin_family = AF_INET;
-    addr->sin_addr.s_addr = sin.sin_addr.s_addr;
-    addr = (struct sockaddr_in *) &route.rt_dst;
-    addr->sin_family = AF_INET;
-    addr->sin_addr.s_addr = sin.sin_addr.s_addr & 0x00ffffff;//INADDR_ANY;
-    addr = (struct sockaddr_in *) &route.rt_genmask;
-    addr->sin_family = AF_INET;
-    addr->sin_addr.s_addr = inet_addr("255.255.255.0");//INADDR_ANY;
-    route.rt_flags = RTF_UP | RTF_GATEWAY;
-    route.rt_metric = 51;
-    if(ioctl(s, SIOCADDRT, &route) < 0) {
-        L_PERROR();
-        close(s);
-        return -1;
+    if(set_route) {
+        struct rtentry route;
+        memset(&route, 0, sizeof(route));
+        route.rt_dev = ifr.ifr_name;
+        addr = (struct sockaddr_in *) &route.rt_gateway;
+        addr->sin_family = AF_INET;
+        addr->sin_addr.s_addr = sin.sin_addr.s_addr;
+        addr = (struct sockaddr_in *) &route.rt_dst;
+        addr->sin_family = AF_INET;
+        addr->sin_addr.s_addr = INADDR_ANY;
+        addr = (struct sockaddr_in *) &route.rt_genmask;
+        addr->sin_family = AF_INET;
+        addr->sin_addr.s_addr = INADDR_ANY;
+        route.rt_flags = RTF_UP | RTF_GATEWAY;
+        route.rt_metric = 51;
+        if(ioctl(s, SIOCADDRT, &route) < 0) {
+            L_PERROR();
+            close(s);
+            return -1;
+        }
     }
-
     close(s);
     return 0;
 }
 
-
 /**
  * Create a tun interface as drain.
  * @param tun_name name of tun interface.
+ * @param ip_addr ip address of tun interface
+ * @param set_route if true, will set as default route.
  * @return if success, return tun file descriptor; if failed, return -1.
  */
-int slow_tun_create(const char *tun_name, const char *ip_addr) {
+int slow_tun_create(const char *tun_name, const char *ip_addr, bool set_route) {
     // set tun interface
     int tun_fd;
     if((tun_fd = open("/dev/net/tun", O_RDWR)) < 0) {
@@ -134,12 +137,14 @@ int slow_tun_create(const char *tun_name, const char *ip_addr) {
         close(tun_fd);
         return -1;
     }
+
     L_INFOF("Created TUN interface drain: %s.", ifr.ifr_name);
 
-    if(tun_init(ifr.ifr_name, ip_addr) < 0) {
+    if(tun_init(ifr.ifr_name, ip_addr, set_route) < 0) {
         L_ERRF("Failed to set route and IP for TUN interface drain: %s.", ifr.ifr_name);
     } else {
         L_INFOF("Route and IP are set for TUN interface drain: %s.", ifr.ifr_name);
     }
     return tun_fd;
 }
+
