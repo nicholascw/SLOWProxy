@@ -35,7 +35,7 @@ int main(int argc, char **argv) {
     }
 
     int sockfd = socket(result->ai_family, SOCK_DGRAM, IPPROTO_UDPLITE);
-    int checksum_len = 10;
+    int checksum_len = 0;
     setsockopt(sockfd, SOL_UDPLITE, UDPLITE_SEND_CSCOV, &checksum_len, sizeof(int));
     setsockopt(sockfd, SOL_UDPLITE, UDPLITE_RECV_CSCOV, &checksum_len, sizeof(int));
     char buf[1024];
@@ -71,7 +71,7 @@ int main(int argc, char **argv) {
                 continue;
             }
             struct sockaddr_in *result_in_ptr = (struct sockaddr_in *) result->ai_addr;
-            fprintf(stderr, "sent %d bytes: \"ping\" to %s:%d\n",
+            fprintf(stderr, "sent %d bytes: \"ping!\" to %s:%d\n",
                     count, inet_ntoa(result_in_ptr->sin_addr), ntohs(result_in_ptr->sin_port));
             count = recvfrom(sockfd, buf, sizeof(buf), MSG_WAITALL, &addr, &addrlen);
             if(count < 0) {

@@ -1,3 +1,4 @@
+
 #ifndef SLOWPROXY_LOG_H
 #define SLOWPROXY_LOG_H
 

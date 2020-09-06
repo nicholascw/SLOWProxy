@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include <stdint.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include <netinet/ip.h>
@@ -8,12 +8,91 @@
 #include <arpa/inet.h>
 
 #include <pthread.h>
-#include <sys/epoll.h>
-
+#include <zstd.h>
 
 #include "log.h"
 #include "tun.h"
-#include "udplite.h"
+#include "udp.h"
+
+
+static size_t pkt_count_rx = 0, pkt_count_tx = 0;
+
+
+void h_sigint(int s) {
+    L_DEBUGF("rx=%zu, tx=%zu", pkt_count_rx, pkt_count_tx);
+    exit(0);
+}
+
+void *server1(void *fd) {
+    int *fds = ((int **) fd)[0];
+    struct sockaddr *c_addr = ((void **) fd)[1];
+    char *buf = malloc(8192);
+    while(1) {
+        int c = read(fds[0], buf, 4096);
+        if(c <= 0)continue;
+        pkt_count_rx++;
+        size_t cc = ZSTD_compress(buf + 4096, 4096, buf, c, 3);
+        int r = slow_udp_pipe_writer(fds[1], buf + 4096, cc, c_addr, sizeof(struct sockaddr));
+        L_DEBUGF("tun => udp: %d bytes", r);
+    }
+    return NULL;
+}
+
+void *server2(void *fd) {
+    int *fds = ((int **) fd)[0];
+    char *buf = malloc(8192);
+    struct sockaddr *c_addr = ((void **) fd)[1];
+    while(1) {
+        int c = slow_udp_pipe_reader(fds[1], buf, 4096, c_addr, sizeof(struct sockaddr));
+        if(c <= 0)continue;
+        size_t dc = ZSTD_decompress(buf + 4096, 4096, buf, c);
+        struct sockaddr_in *dbgin = (struct sockaddr_in *) c_addr;
+        L_DEBUGF("%s:%d", inet_ntoa(dbgin->sin_addr), ntohs(dbgin->sin_port));
+        if(c < 8192) {
+            int r = write(fds[0], buf + 4096, dc);
+            pkt_count_tx++;
+            L_DEBUGF("udp => tun: %d bytes", r);
+        }
+    }
+    return NULL;
+}
+
+void *client1(void *fd) {
+    int *fds = ((int **) fd)[0];
+    struct sockaddr *srv = ((void **) fd)[1];
+    char *buf = malloc(8192);
+
+    while(1) {
+        int c = read(fds[0], buf, 4096);
+        pkt_count_rx++;
+        if(c <= 0)continue;
+        struct iphdr *hdr = (struct iphdr *) buf;
+        inet_ntop(AF_INET, &hdr->saddr, buf + 8000, INET_ADDRSTRLEN);
+        inet_ntop(AF_INET, &hdr->daddr, buf + 8032, INET_ADDRSTRLEN);
+        L_DEBUGF("src: %s; dst: %s", buf + 8000, buf + 8032);
+        size_t cc = ZSTD_compress(buf + 4096, 4096, buf, c, 3);
+        int r = slow_udp_pipe_writer(fds[1], buf + 4096, cc, srv, sizeof(struct sockaddr));
+        L_DEBUGF("tun => udp: %d bytes", r);
+    }
+}
+
+void *client2(void *fd) {
+    int *fds = ((int **) fd)[0];
+    struct sockaddr *srv = ((void **) fd)[1];
+    char *buf = malloc(8192);
+    while(1) {
+        int c = slow_udp_pipe_reader(fds[1], buf, 4096, srv, sizeof(struct sockaddr));
+        if(c <= 0)continue;
+        size_t dc = ZSTD_decompress(buf + 4096, 4096, buf, c);
+        struct iphdr *hdr = (struct iphdr *) (buf + 4096);
+        inet_ntop(AF_INET, &hdr->saddr, buf + 8000, INET_ADDRSTRLEN);
+        inet_ntop(AF_INET, &hdr->daddr, buf + 8032, INET_ADDRSTRLEN);
+        L_DEBUGF("src: %s; dst: %s", buf + 8000, buf + 8032);
+        int r = write(fds[0], buf + 4096, dc);
+        pkt_count_tx++;
+        L_DEBUGF("udp => tun: %d bytes", r);
+    }
+}
 
 int main(int argc, char *argv[]) {
 #ifdef NDEBUG
@@ -21,90 +100,38 @@ int main(int argc, char *argv[]) {
         L_WARN("You are not recommended to use this program with root privilege."
                " Use setcap if you are able to.")
 #endif
-    char *buf = malloc(80000);
-    int epfd = epoll_create(2);
-    if(epfd < 0) {
-        L_PERROR();
-        return -1;
-    }
-
-    struct epoll_event epresult[10], epev = {
-            .events = EPOLLIN
-    };
-
+    signal(SIGINT, h_sigint);
+    pthread_t pool[2];
     if(argc > 1 && argv[1][0] == 's') {
-        // server
-        int nfd = slow_tun_create(NULL, "172.23.33.32", false);
-        int pfd = slow_udplite_pipe_init("0.0.0.0", "8192", NULL, NULL);
-        epev.data.fd = nfd;
-        epoll_ctl(epfd, EPOLL_CTL_ADD, nfd, &epev);
-        epev.data.fd = pfd;
-        epoll_ctl(epfd, EPOLL_CTL_ADD, pfd, &epev);
         struct sockaddr c_addr;
-        slow_udplite_pipe_reader(pfd, buf, 5, &c_addr, sizeof(c_addr));
-        buf[5] = 0;
-        L_ERR(buf);
-        while(1) {
-            int count = epoll_wait(epfd, epresult, 10, -1);
-            if(count > 0) {
-                for(int i = 0; i < count; i++) {
-                    if(epresult[i].data.fd == nfd) {
-                        int c = read(nfd, buf, 80000);
-                        int r = slow_udplite_pipe_writer(pfd, buf, c, &c_addr, sizeof(c_addr));
-                        L_DEBUGF("Wrote %d bytes to udplite pipe.", r);
-                    } else if(epresult[i].data.fd == pfd) {
-                        int c = slow_udplite_pipe_reader(pfd, buf, 80000, &c_addr, sizeof(c_addr));
-                        dbg(c_addr.sa_family);
-                        struct sockaddr_in *dbgin = (struct sockaddr_in *) &c_addr;
-                        L_DEBUGF("%s:%d", inet_ntoa(dbgin->sin_addr), ntohs(dbgin->sin_port));
-                        int r = write(nfd, buf, c);
-                        L_DEBUGF("Wrote %d bytes to tun nozzle.", r);
-                    }
-                }
-            }
-        }
+        // server
+        int fds[2];
+        void *args[2];
+        args[0] = fds;
+        args[1] = &c_addr;
+        fds[0] = slow_tun_create(NULL, "172.23.33.32", false);
+        fds[1] = slow_udp_pipe_init("0.0.0.0", "8192", NULL, NULL);
+        pthread_create(pool, 0, server1, &args);
+        pthread_create(pool + 1, 0, server2, &args);
+        pthread_join(pool[0], NULL);
+        pthread_join(pool[1], NULL);
     } else {
         //  client
-        int pfd = slow_udplite_pipe_init("0.0.0.0", "0", "107.174.42.145", "8192");
-        int nfd = slow_tun_create(NULL, NULL, true);
-        epev.data.fd = nfd;
-        epoll_ctl(epfd, EPOLL_CTL_ADD, nfd, &epev);
-        epev.data.fd = pfd;
-        epoll_ctl(epfd, EPOLL_CTL_ADD, pfd, &epev);
+        int fds[2];
+        fds[1] = slow_udp_pipe_init("0.0.0.0", "0", "1.1.1.1", "8192");
+        fds[0] = slow_tun_create(NULL, NULL, true);
         struct sockaddr_in srv = {
                 .sin_family = AF_INET,
-                .sin_addr.s_addr = inet_addr("107.174.42.145"),
+                .sin_addr.s_addr = inet_addr("1.1.1.1"),
                 .sin_port = htons(8192),
         };
-        L_DEBUGF("nfd=%d, pfd=%d", nfd, pfd);
-
-        L_ERRF("%d bytes wrote",
-               slow_udplite_pipe_writer(pfd, "hello", 5, (struct sockaddr *) &srv, sizeof(srv))
-        );
-        while(1) {
-            int count = epoll_wait(epfd, epresult, 10, -1);
-            if(count > 0) {
-                for(int i = 0; i < count; i++) {
-                    if(epresult[i].data.fd == nfd) {
-                        L_DEBUG("nfd");
-                        int c = read(nfd, buf, 80000);
-                        struct iphdr *hdr = (struct iphdr *) buf;
-                        inet_ntop(AF_INET, &hdr->saddr, buf + 3000, INET_ADDRSTRLEN);
-                        inet_ntop(AF_INET, &hdr->daddr, buf + 4000, INET_ADDRSTRLEN);
-                        L_DEBUGF("src: %s; dst: %s", buf + 3000, buf + 4000);
-                        int r = slow_udplite_pipe_writer(pfd, buf, c, (struct sockaddr *) &srv,
-                                                         sizeof(srv));
-                        L_DEBUGF("Wrote %d bytes to udplite pipe.", r);
-                    } else if(epresult[i].data.fd == pfd) {
-                        L_DEBUG("pfd");
-                        int c = slow_udplite_pipe_reader(pfd, buf, 80000, (struct sockaddr *) &srv,
-                                                         sizeof(srv));
-                        int r = write(nfd, buf, c);
-                        L_DEBUGF("Wrote %d bytes to tun nozzle.", r);
-                    }
-                }
-            }
-        }
+        void *args[2];
+        args[0] = fds;
+        args[1] = &srv;
+        pthread_create(pool, 0, client1, &args);
+        pthread_create(pool + 1, 0, client2, &args);
+        pthread_join(pool[0], NULL);
+        pthread_join(pool[1], NULL);
     }
     return 0;
 }

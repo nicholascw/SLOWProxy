@@ -1,12 +1,10 @@
 cmake_minimum_required(VERSION 2.8)
 project(SLOWProxy C)
 set(CMAKE_C_COMPILER "clang")
-set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0 -g3 -rdynamic -Wall -pedantic -Wno-address -Wno-unused-function -Wno-empty-translation-unit -Wno-unused-command-line-argument")
+set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O3 -g3 -rdynamic -Wall -lprofiler -pedantic -Wno-address -Wno-unused-function -Wno-empty-translation-unit -Wno-unused-command-line-argument")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -Ofast -Wall -DNDBG")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread")
 file(GLOB_RECURSE ALL_DOTC LIST_DIRECTORIES false RELATIVE ${PROJECT_SOURCE_DIR} *.c)
-
-
 file(GLOB_RECURSE UNIVERSE LIST_DIRECTORIES true RELATIVE ${PROJECT_SOURCE_DIR} *)
 SET(SUBDIRS "")
 FOREACH (SUBDIR ${UNIVERSE})
@@ -19,13 +17,15 @@ add_executable(slowproxy ${ALL_DOTC} ${ALL_DOTH})
 
 find_package(OpenSSL REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(zstd REQUIRED)
 pkg_search_module(gpgme required)
 pkg_search_module(libev required)
-pkg_search_module(libmnl required)
+#pkg_search_module(libmnl required)
 
 target_link_libraries(slowproxy ${OpenSSL_LIBRARIES})
 target_link_libraries(slowproxy ${gpgme_LIBRARIES})
 target_link_libraries(slowproxy ${libev_LIBRARIES})
-target_link_libraries(slowproxy ${libmnl_LIBRARIES})
+#target_link_libraries(slowproxy ${libmnl_LIBRARIES})
+target_link_libraries(slowproxy ${zstd_LIBRARIES})
 
 set(CMAKE_VERBOSE_MAKEFILE off)
